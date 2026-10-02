@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Check, MailCheck, MailPlus } from "lucide-react";
-import { AutoRefresh } from "@/components/auto-refresh";
+   import { AutoRefresh } from "@/components/auto-refresh";
+   import { CheckRepliesButton } from "@/components/check-replies-button";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ export default async function SentTrackerPage() {
       <PageHeader
         title="Sent tracker"
         description="Every email you send from Northstar, and whether it was opened or answered. Updates automatically."
-        actions={<Button asChild><Link href="/email/compose"><MailPlus />Compose</Link></Button>}
+        actions={<><CheckRepliesButton /><Button asChild><Link href="/email/compose"><MailPlus />Compose</Link></Button></>}
       />
       <AutoRefresh seconds={30} />
       {items.length === 0 ? (
