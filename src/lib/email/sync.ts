@@ -2,14 +2,45 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { gmailForAccount } from "@/lib/email/gmail";
 import { importGmailThread } from "@/lib/email/import";
+import { checkTrackedReplies } from "@/lib/email/check-replies";
+import { recentMailQuery, emailWindowStart } from "@/lib/email/window";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-type Account = { id: string; owner_id: string; sync_query: string; import_after: string; status: string };
-export async function syncGmailAccount(accountId: string) { const admin = createSupabaseAdminClient(); const { data: account, error } = await admin.from("email_accounts").select("id,owner_id,sync_query,import_after,status").eq("id", accountId).single(); if (error || !account || account.status !== "connected") throw new Error("Gmail account is unavailable"); const typed = account as Account; const lock = randomUUID(); const now = new Date(); const expires = new Date(now.getTime() + 10 * 60_000).toISOString(); const { data: claimed } = await admin.from("sync_state").update({ status: "running", lock_token: lock, lock_expires_at: expires, last_attempt_at: now.toISOString(), error_code: null, safe_error_message: null }).eq("email_account_id", accountId).or(`lock_expires_at.is.null,lock_expires_at.lt.${now.toISOString()}`).select("gmail_history_id,next_page_token").maybeSingle(); if (!claimed) return { status: "already_running" as const };
-  try { const gmail = await gmailForAccount(accountId, typed.owner_id); let threadIds: string[] = []; let nextPageToken: string | null = null; let latestHistoryId: string | null = claimed.gmail_history_id;
-    if (!claimed.gmail_history_id || claimed.next_page_token) { const after = typed.import_after.replaceAll("-", "/"); const listed = await gmail.users.threads.list({ userId: "me", q: `after:${after} ${typed.sync_query}`.trim(), maxResults: 50, pageToken: claimed.next_page_token ?? undefined }); threadIds = (listed.data.threads ?? []).flatMap((thread) => thread.id ? [thread.id] : []); nextPageToken = listed.data.nextPageToken ?? null; const profile = await gmail.users.getProfile({ userId: "me" }); latestHistoryId = profile.data.historyId ?? latestHistoryId; }
-    else { try { const history = await gmail.users.history.list({ userId: "me", startHistoryId: claimed.gmail_history_id, historyTypes: ["messageAdded"], maxResults: 100 }); threadIds = Array.from(new Set((history.data.history ?? []).flatMap((record) => record.messagesAdded ?? []).flatMap((added) => added.message?.threadId ? [added.message.threadId] : []))); latestHistoryId = history.data.historyId ?? latestHistoryId; nextPageToken = history.data.nextPageToken ?? null; } catch (historyError) { const status = (historyError as { code?: number }).code; if (status === 404) { await admin.from("sync_state").update({ status: "needs_full_sync", gmail_history_id: null, next_page_token: null, lock_token: null, lock_expires_at: null, error_code: "HISTORY_EXPIRED", safe_error_message: "Gmail history expired; a bounded full sync is required." }).eq("email_account_id", accountId).eq("lock_token", lock); return { status: "needs_full_sync" as const }; } throw historyError; } }
-    let imported = 0; for (const providerThreadId of threadIds) { await importGmailThread(gmail, { ownerId: typed.owner_id, accountId, providerThreadId }); imported += 1; }
-    const stillPaging = Boolean(nextPageToken); await admin.from("sync_state").update({ status: stillPaging ? "queued" : "idle", gmail_history_id: latestHistoryId, next_page_token: nextPageToken, progress_current: imported, last_successful_at: new Date().toISOString(), lock_token: null, lock_expires_at: null }).eq("email_account_id", accountId).eq("lock_token", lock); await admin.from("email_accounts").update({ last_successful_sync_at: new Date().toISOString(), last_error_code: null, last_error_at: null }).eq("id", accountId); return { status: stillPaging ? "more" as const : "complete" as const, imported };
-  } catch (syncError) { await admin.from("sync_state").update({ status: "failed", lock_token: null, lock_expires_at: null, error_code: "SYNC_FAILED", safe_error_message: "Gmail synchronization failed. Reconnect if the problem continues." }).eq("email_account_id", accountId).eq("lock_token", lock); await admin.from("email_accounts").update({ last_error_code: "SYNC_FAILED", last_error_at: new Date().toISOString() }).eq("id", accountId); throw syncError; }
+export async function syncGmailAccount(accountId: string) {
+  const admin = createSupabaseAdminClient();
+  const { data: account, error } = await admin.from("email_accounts").select("id,owner_id,status").eq("id", accountId).single();
+  if (error || !account || account.status !== "connected") throw new Error("Gmail account is unavailable");
+  const lock = randomUUID();
+  const now = new Date();
+  const { data: claimed, error: lockError } = await admin.from("sync_state")
+    .update({ status: "running", lock_token: lock, lock_expires_at: new Date(now.getTime() + 10 * 60000).toISOString(), last_attempt_at: now.toISOString(), error_code: null, safe_error_message: null })
+    .eq("email_account_id", accountId).or(`lock_expires_at.is.null,lock_expires_at.lt.${now.toISOString()}`)
+    .select("id").maybeSingle();
+  if (lockError) throw new Error("Could not claim Gmail sync");
+  if (!claimed) return { status: "already_running" as const };
+  try {
+    const gmail = await gmailForAccount(accountId, account.owner_id);
+    // Start from the newest recent mail every run. Never reuse old full-sync page tokens.
+    const listed = await gmail.users.threads.list({ userId: "me", q: recentMailQuery(now), maxResults: 50 });
+    const threadIds = [...new Set((listed.data.threads ?? []).flatMap((thread) => thread.id ? [thread.id] : []))];
+    let imported = 0;
+    for (const providerThreadId of threadIds) {
+      await importGmailThread(gmail, { ownerId: account.owner_id, accountId, providerThreadId, since: emailWindowStart(now) });
+      imported += 1;
+    }
+    const replies = await checkTrackedReplies(accountId, account.owner_id, new Set(threadIds));
+    const completedAt = new Date().toISOString();
+    const { error: stateError } = await admin.from("sync_state").update({
+      status: "idle", progress_current: imported, last_successful_at: completedAt,
+      lock_token: null, lock_expires_at: null
+    }).eq("email_account_id", accountId).eq("lock_token", lock);
+    if (stateError) throw new Error("Could not finish Gmail sync");
+    const { error: accountError } = await admin.from("email_accounts").update({ last_successful_sync_at: completedAt, last_error_code: null, last_error_at: null }).eq("id", accountId);
+    if (accountError) throw new Error("Could not record Gmail sync");
+    return { status: "complete" as const, imported, repliesChecked: replies.checked };
+  } catch (error) {
+    await admin.from("sync_state").update({ status: "failed", lock_token: null, lock_expires_at: null, error_code: "SYNC_FAILED", safe_error_message: "Gmail synchronization failed. Check setup or reconnect." }).eq("email_account_id", accountId).eq("lock_token", lock);
+    await admin.from("email_accounts").update({ last_error_code: "SYNC_FAILED", last_error_at: new Date().toISOString() }).eq("id", accountId);
+    throw error;
+  }
 }

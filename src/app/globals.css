@@ -18,3 +18,12 @@ html { background: var(--background); }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-geist-sans), Arial, sans-serif; }
 ::selection { background: #bce2cb; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }
+
+@media print {
+  @page { size: A4; margin: 16mm; }
+  body { display: block !important; background: white !important; color: black !important; }
+  body * { visibility: hidden; }
+  .cv-preview, .cv-preview * { visibility: visible; }
+  .cv-preview { position: absolute; left: 0; top: 0; width: 100%; padding: 0; border: 0; font-size: 11pt; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cv-controls, header, aside, nav { display: none !important; }
+}

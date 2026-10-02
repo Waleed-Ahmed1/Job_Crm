@@ -14,7 +14,7 @@ export function CheckRepliesButton() {
     try {
       const response = await fetch("/api/gmail/check-replies", { method: "POST" });
       const data = (await response.json().catch(() => ({}))) as { checked?: number; total?: number; error?: string };
-      setStatus(response.ok ? `Checked ${data.checked ?? 0} of ${data.total ?? 0} conversations.` : (data.error ?? "Check failed"));
+      setStatus(response.ok ? `Checked ${data.checked ?? 0} of ${data.total ?? 0} conversations in this batch.${(data.checked ?? 0) < (data.total ?? 0) ? " Some could not be checked; try again." : " Older emails are checked in rotating batches."}` : (data.error ?? "Check failed"));
       router.refresh();
     } catch {
       setStatus("Could not reach the server");

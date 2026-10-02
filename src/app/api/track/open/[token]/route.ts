@@ -9,7 +9,7 @@ export async function GET(_: Request, context: { params: Promise<{ token: string
   const { token } = await context.params;
   if (/^[A-Za-z0-9_-]{20,64}$/.test(token)) {
     try {
-      await createSupabaseAdminClient().rpc("record_mail_open", { p_token: token });
+      await createSupabaseAdminClient().rpc("record_workspace_mail_open", { p_token: token });
     } catch {
       /* Never break the image response because of a tracking failure. */
     }

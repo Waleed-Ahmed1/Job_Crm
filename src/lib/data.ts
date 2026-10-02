@@ -1,6 +1,8 @@
 import "server-only";
 import { DEMO_APPLICATIONS, DEMO_TASKS, DEMO_THREADS } from "@/lib/demo-data";
 import type { ApplicationListItem, EmailMessageItem, EmailThreadListItem, SentMailItem, TaskItem } from "@/lib/types";
+import { emailWindowStart } from "@/lib/email/window";
+import { isMissingWorkspaceSchema } from "@/lib/email/preferences";
 import { requireViewer } from "@/lib/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -39,9 +41,9 @@ export async function listTasks(): Promise<TaskItem[]> {
 type ThreadRow = { id: string; provider_thread_id: string; subject: string | null; snippet: string | null; participant_emails: string[] | null; last_message_at: string; unread_count: number; thread_applications: { applications: { role_title: string; companies: { name: string } | { name: string }[] | null } }[] | null };
 export async function listThreads(): Promise<EmailThreadListItem[]> {
   const viewer = await requireViewer();
-  if (viewer.demo) return DEMO_THREADS;
+  if (viewer.demo) return DEMO_THREADS.filter((thread) => thread.lastMessageAt >= emailWindowStart()).map((thread) => ({ ...thread, applicationLabel: null }));
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.from("email_threads").select("id, provider_thread_id, subject, snippet, participant_emails, last_message_at, unread_count, thread_applications(applications(role_title, companies(name)))").order("last_message_at", { ascending: false }).limit(100);
+  const { data, error } = await supabase.from("email_threads").select("id, provider_thread_id, subject, snippet, participant_emails, last_message_at, unread_count").eq("owner_id", viewer.id).gte("last_message_at", emailWindowStart()).order("last_message_at", { ascending: false }).limit(50);
   if (error) throw new Error("Could not load email conversations");
   return ((data ?? []) as unknown as ThreadRow[]).map((row) => { const app = row.thread_applications?.[0]?.applications; const company = app ? one(app.companies) : null; return { id: row.id, providerThreadId: row.provider_thread_id, subject: row.subject ?? "(no subject)", snippet: row.snippet ?? "", participants: row.participant_emails ?? [], lastMessageAt: row.last_message_at, unread: row.unread_count > 0, applicationLabel: app ? `${app.role_title} · ${company?.name ?? "Unknown"}` : null }; });
 }
@@ -72,15 +74,31 @@ export async function getIntegrationStatus() {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.from("email_accounts").select("status, last_successful_sync_at, sync_query, import_after").eq("owner_id", viewer.id).eq("provider", "gmail").maybeSingle();
   if (error) throw new Error("Could not load Gmail connection status. Check database access and migrations.");
-  return { connected: data?.status === "connected", lastSuccessfulSyncAt: data?.last_successful_sync_at ?? null, coverage: data ? `${data.sync_query || "all configured mail"} since ${data.import_after || "configured start"}` : "Not connected" };
+  return { connected: data?.status === "connected", lastSuccessfulSyncAt: data?.last_successful_sync_at ?? null, coverage: data ? "Latest 50 conversations from the last 3 days" : "Not connected" };
 }
 
+export type TrackerFilter = "all" | "unopened" | "opened" | "replied" | "failed";
 type SentRow = { id: string; status: SentMailItem["status"]; subject: string | null; to_addresses: string[] | null; started_at: string | null; finished_at: string | null; tracking_token: string | null; first_opened_at: string | null; open_count: number; replied_at: string | null };
-   export async function listSentMail(): Promise<SentMailItem[]> {
-     const viewer = await requireViewer();
-     if (viewer.demo) return [];
-     const supabase = await createSupabaseServerClient();
-     const { data, error } = await supabase.from("outbound_send_attempts").select("id, status, subject, to_addresses, started_at, finished_at, tracking_token, first_opened_at, open_count, replied_at").order("created_at", { ascending: false }).limit(200);
-     if (error) throw new Error("Could not load sent mail");
-     return ((data ?? []) as SentRow[]).map((row) => ({ id: row.id, status: row.status, recipients: row.to_addresses ?? [], subject: row.subject ?? "(no subject)", sentAt: row.finished_at ?? row.started_at, tracked: Boolean(row.tracking_token), firstOpenedAt: row.first_opened_at, openCount: row.open_count, repliedAt: row.replied_at }));
-   }
+export async function listSentMail({ filter = "all", page = 0 }: { filter?: TrackerFilter; page?: number } = {}): Promise<SentMailItem[]> {
+  const viewer = await requireViewer();
+  if (viewer.demo) return [];
+  const supabase = await createSupabaseServerClient();
+  function query(archiveFilter: boolean) {
+    let request = supabase.from("outbound_send_attempts").select("id,status,subject,to_addresses,started_at,finished_at,tracking_token,first_opened_at,open_count,replied_at").eq("owner_id", viewer.id);
+    if (archiveFilter) request = request.is("archived_at", null);
+    if (filter === "opened") request = request.eq("status", "sent").not("first_opened_at", "is", null);
+    if (filter === "replied") request = request.eq("status", "sent").not("replied_at", "is", null);
+    if (filter === "unopened") request = request.eq("status", "sent").not("tracking_token", "is", null).is("first_opened_at", null);
+    if (filter === "failed") request = request.eq("status", "failed");
+    return request.order("created_at", { ascending: false }).order("id", { ascending: false }).range(page * 50, page * 50 + 50);
+  }
+  let result = await query(true);
+  // Keep the existing tracker readable if code arrives before the additive migration.
+  if (isMissingWorkspaceSchema(result.error)) result = await query(false);
+  if (result.error) throw new Error("Could not load sent mail");
+  return ((result.data ?? []) as SentRow[]).map((row) => ({
+    id: row.id, status: row.status, recipients: row.to_addresses ?? [], subject: row.subject ?? "(no subject)",
+    sentAt: row.finished_at ?? row.started_at, tracked: Boolean(row.tracking_token),
+    firstOpenedAt: row.first_opened_at, openCount: row.open_count, repliedAt: row.replied_at
+  }));
+}
