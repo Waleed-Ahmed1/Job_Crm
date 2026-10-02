@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f7f8f6; --foreground: #18211b; --card: #ffffff; --card-foreground: #18211b;
+  --primary: #177245; --primary-foreground: #ffffff; --secondary: #e9eee9; --secondary-foreground: #24362a;
+  --muted: #eef1ed; --muted-foreground: #66736a; --accent: #e5efe8; --accent-foreground: #145c3a;
+  --destructive: #b42318; --border: #dce2dc; --input: #cfd8d0; --ring: #47a578;
+}
+@theme inline {
+  --color-background: var(--background); --color-foreground: var(--foreground); --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground); --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground); --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive); --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans); --font-mono: var(--font-geist-mono);
+}
+* { border-color: var(--border); }
+html { background: var(--background); }
+body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-geist-sans), Arial, sans-serif; }
+::selection { background: #bce2cb; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; } }

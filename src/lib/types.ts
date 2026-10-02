@@ -1,0 +1,7 @@
+export const APPLICATION_STAGES = ["Saved", "Applied", "Screening", "Interview", "Offer", "Rejected", "Withdrawn"] as const;
+export type ApplicationStage = (typeof APPLICATION_STAGES)[number];
+export type ApplicationListItem = { id: string; role: string; company: string; companyId?: string; stage: ApplicationStage; location: string | null; workArrangement: "Remote" | "Hybrid" | "On-site" | null; appliedAt: string | null; savedAt: string; priority: "Low" | "Normal" | "High"; tags: string[]; nextAction: string | null; nextActionAt: string | null; contactName?: string | null };
+export type TaskItem = { id: string; title: string; dueAt: string; status: "pending" | "completed" | "cancelled" | "needs_review"; kind: "follow_up" | "interview_prep" | "general"; applicationId: string | null; applicationLabel: string | null };
+export type EmailThreadListItem = { id: string; providerThreadId: string; subject: string; snippet: string; participants: string[]; lastMessageAt: string; unread: boolean; applicationLabel: string | null };
+export type EmailMessageItem = { id: string; direction: "incoming" | "outgoing"; from: string; to: string[]; subject: string | null; sentAt: string; bodyText: string; rfcMessageId: string | null };
+export type SentMailItem = { id: string; status: "pending" | "sending" | "sent" | "failed" | "uncertain"; recipients: string[]; subject: string; sentAt: string | null; tracked: boolean; firstOpenedAt: string | null; openCount: number; repliedAt: string | null };

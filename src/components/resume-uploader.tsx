@@ -1,0 +1,7 @@
+"use client";
+import { useState } from "react";
+import { Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+export function ResumeUploader({ disabled }: { disabled?: boolean }) { const [status, setStatus] = useState(""); async function submit(formData: FormData) { setStatus("Uploading…"); const response = await fetch("/api/resumes", { method: "POST", body: formData }); const result = await response.json() as { label?: string; version_number?: number; error?: string }; setStatus(response.ok ? `${result.label} v${result.version_number} uploaded.` : result.error ?? "Upload failed."); } return <form action={submit} className="space-y-3"><div className="space-y-2"><Label htmlFor="resume-label">Version label</Label><Input id="resume-label" name="label" placeholder="General product design" required disabled={disabled} /></div><Input name="file" type="file" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required disabled={disabled} /><p className="text-xs text-muted-foreground">PDF or DOCX, up to 10 MB. Type and file signature are validated server-side.</p><Button type="submit" variant="outline" disabled={disabled}><Upload />Upload private resume</Button>{status ? <p role="status" className="text-sm text-muted-foreground">{status}</p> : null}</form>; }
