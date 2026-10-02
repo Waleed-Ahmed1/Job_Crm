@@ -11,3 +11,5 @@ export function AutoRefresh({ seconds = 30 }: { seconds?: number }) {
   }, [router, seconds]);
   return null;
 }
+
+// commit code
